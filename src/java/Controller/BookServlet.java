@@ -75,7 +75,7 @@ public class BookServlet extends HttpServlet {
                     List<Book> books = (keyword != null && !keyword.trim().isEmpty())
                             ? bookDAO.searchBooksByKeyword(keyword.trim())
                             : bookDAO.getAllBooks();
-
+                 //hi im mohanad
                     Map<Integer, Integer> borrowCounts = new HashMap<>();
                     for (Book book : books) {
                         int count = transactionDAO.getBorrowCountByBookId(book.getBookId());
