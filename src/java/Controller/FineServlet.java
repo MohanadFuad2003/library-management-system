@@ -1,15 +1,11 @@
 package Controller;
 
-import DAO.FineDAO;
-import DAO.NotificationDAO;
-import DAO.SystemConfigDAO;
-import DAO.TransactionDAO;
-import DAO.UserDAO;
+import DAO.*;
 import Util.DBConnection;
-import models.Fine;
-import models.SystemConfig;
+import models.*;
 
-import javax.servlet.*;
+import javax.servlet.ServletException;
+import javax.servlet.annotation.WebServlet;
 import javax.servlet.http.*;
 import java.io.IOException;
 import java.sql.Connection;
@@ -17,265 +13,267 @@ import java.sql.Date;
 import java.sql.Timestamp;
 import java.time.LocalDate;
 import java.util.List;
-import models.Notification;
-import models.User;
-
 
 public class FineServlet extends HttpServlet {
 
+    /* =========================================================
+     *                        GET METHOD
+     * ========================================================= */
     @Override
-    protected void doGet(HttpServletRequest request, HttpServletResponse response)
+    protected void doGet(HttpServletRequest req, HttpServletResponse resp)
             throws ServletException, IOException {
 
-        String action = request.getParameter("action");
-        if (action == null) action = "viewAll";
+        String ctx     = req.getContextPath();
+        String action  = req.getParameter("action") == null
+                       ? "viewAll"
+                       : req.getParameter("action");
 
-        HttpSession session = request.getSession();
-        User currentUser = (User) session.getAttribute("currentUser");
+        HttpSession session = req.getSession();
+        User currentUser    = (User) session.getAttribute("currentUser");
         if (currentUser == null) {
-            response.sendRedirect("login.jsp");
+            resp.sendRedirect(ctx + "/login.jsp");
             return;
         }
 
         try (Connection conn = DBConnection.getConnection()) {
-            FineDAO fineDAO = new FineDAO(conn);
-            SystemConfigDAO configDAO = new SystemConfigDAO(conn);
-            NotificationDAO notificationDAO = new NotificationDAO(conn);
-            UserDAO userDAO = new UserDAO(conn); // لجللب جميع المستخدمين للصلاحيات
+
+            FineDAO         fineDAO = new FineDAO(conn);
+            SystemConfigDAO confDAO = new SystemConfigDAO(conn);
+            NotificationDAO nDAO    = new NotificationDAO(conn);
+            UserDAO         userDAO = new UserDAO(conn);
+            TransactionDAO  txDAO   = new TransactionDAO(conn);
 
             switch (action) {
-                case "viewAll":
-                    double fineRatePerDay = 1.0;
-                    try {
-                        SystemConfig config = configDAO.getCurrentConfig();
-                        if (config != null) fineRatePerDay = config.getFineRate();
-                    } catch (Exception e) {
-                        e.printStackTrace();
-                    }
 
-                    fineDAO.createFinesForOverdueTransactions(fineRatePerDay);
+                /* ----------- 1) جميع الغرامات (للموظف) ----------- */
+                case "viewAll": {
+                    double rate = 1.0;
+                    SystemConfig cfg = confDAO.getCurrentConfig();
+                    if (cfg != null) rate = cfg.getFineRate();
+                    fineDAO.createFinesForOverdueTransactions(rate);
 
-                    String searchUser = request.getParameter("searchUser");
-                    String searchBook = request.getParameter("searchBook");
-                    String searchStatus = request.getParameter("searchStatus");
-
-                    List<Fine> fines;
-                    if ("admin".equals(currentUser.getRole()) || "librarian".equals(currentUser.getRole())) {
-                        fines = fineDAO.getFinesWithFilters(searchUser, searchBook, searchStatus);
-                    } else {
-                        response.sendError(HttpServletResponse.SC_FORBIDDEN, "Access Denied");
+                    if (!("admin".equalsIgnoreCase(currentUser.getRole())
+                       || "librarian".equalsIgnoreCase(currentUser.getRole()))) {
+                        resp.sendError(HttpServletResponse.SC_FORBIDDEN, "Access Denied");
                         return;
                     }
 
-                    request.setAttribute("searchUser", searchUser);
-                    request.setAttribute("searchBook", searchBook);
-                    request.setAttribute("searchStatus", searchStatus);
-                    request.setAttribute("fines", fines);
-                    request.getRequestDispatcher("fine_list.jsp").forward(request, response);
-                    break;
+                    String sUser   = req.getParameter("searchUser");
+                    String sBook   = req.getParameter("searchBook");
+                    String sStatus = req.getParameter("searchStatus");
 
-                case "markPaid":
-                    if (!("admin".equals(currentUser.getRole()) || "librarian".equals(currentUser.getRole()))) {
-                        response.sendError(HttpServletResponse.SC_FORBIDDEN, "Access Denied");
+                    List<Fine> fines = fineDAO.getFinesWithFilters(sUser, sBook, sStatus);
+
+                    req.setAttribute("searchUser",   sUser);
+                    req.setAttribute("searchBook",   sBook);
+                    req.setAttribute("searchStatus", sStatus);
+                    req.setAttribute("fines",        fines);
+                    req.getRequestDispatcher("fine_list.jsp").forward(req, resp);
+                    break;
+                }
+
+                /* ------------- 2) وضع غرامة كمدفوعة ------------- */
+                case "markPaid": {
+                    if (!("admin".equalsIgnoreCase(currentUser.getRole())
+                       || "librarian".equalsIgnoreCase(currentUser.getRole()))) {
+                        resp.sendError(HttpServletResponse.SC_FORBIDDEN, "Access Denied");
                         return;
                     }
 
-                    int fineIdToMark = Integer.parseInt(request.getParameter("fineId"));
-                    fineDAO.markFineAsPaid(fineIdToMark, Date.valueOf(LocalDate.now()));
+                    int fineId = Integer.parseInt(req.getParameter("fineId"));
+                    fineDAO.markFineAsPaid(fineId, Date.valueOf(LocalDate.now()));
 
-                    Fine paidFine = fineDAO.getFineById(fineIdToMark);
-                    if (paidFine != null) {
-                        String message = "تم دفع الغرامة عن استعارتك لكتاب '" + paidFine.getBookTitle() + "' (معرّف الغرامة: " + fineIdToMark + "). شكراً لك!";
-                        Timestamp now = new Timestamp(System.currentTimeMillis());
-
-                        // 1. إشعار الباترون المعني
-                        notificationDAO.insertNotification(new Notification(
-                            0,
-                            paidFine.getUserId(),
-                            message,
-                            "unread",
-                            now
-                        ));
-
-                        // 2. إشعار جميع الإداريين
-                        List<User> admins = userDAO.getUsersByRole("admin");
-                        List<User> librarians = userDAO.getUsersByRole("librarian");
-                        for (User admin : admins) {
-                            notificationDAO.insertNotification(new Notification(0, admin.getUserId(), message, "unread", now));
-                        }
-                        for (User librarian : librarians) {
-                            notificationDAO.insertNotification(new Notification(0, librarian.getUserId(), message, "unread", now));
-                        }
-                    }
-
-                    session.setAttribute("message", "Fine marked as paid successfully and notification sent.");
-                    session.setAttribute("status", "success");
-                    response.sendRedirect("FineServlet?action=viewAll");
-                    break;
-
-                case "delete":
-                    if (!"admin".equals(currentUser.getRole())) {
-                        response.sendError(HttpServletResponse.SC_FORBIDDEN, "Access Denied");
-                        return;
-                    }
-                    int deleteFineId = Integer.parseInt(request.getParameter("fineId"));
-                    Fine fineToDelete = fineDAO.getFineById(deleteFineId);
-                    if (fineToDelete != null) {
-                        String transactionId = fineToDelete.getTransactionId();
-                        fineDAO.deleteFine(deleteFineId);
-                        TransactionDAO transactionDAO = new TransactionDAO(conn);
-                        transactionDAO.blockFineForTransaction(transactionId);
-
-                        String message = "تم حذف الغرامة عن استعارتك لكتاب '" + fineToDelete.getBookTitle() + "'.";
-                        Timestamp now = new Timestamp(System.currentTimeMillis());
-
-                        // 1. إشعار الباترون
-                        notificationDAO.insertNotification(new Notification(
-                            0,
-                            fineToDelete.getUserId(),
-                            message,
-                            "unread",
-                            now
-                        ));
-                        // 2. إشعار جميع الإداريين
-                        List<User> admins = userDAO.getUsersByRole("admin");
-                        List<User> librarians = userDAO.getUsersByRole("librarian");
-                        for (User admin : admins) {
-                            notificationDAO.insertNotification(new Notification(0, admin.getUserId(), message, "unread", now));
-                        }
-                        for (User librarian : librarians) {
-                            notificationDAO.insertNotification(new Notification(0, librarian.getUserId(), message, "unread", now));
-                        }
-
-                        session.setAttribute("message", "Fine deleted successfully and notifications sent to all.");
-                        session.setAttribute("status", "success");
-                    } else {
-                        session.setAttribute("message", "Fine not found.");
-                        session.setAttribute("status", "error");
-                    }
-                    response.sendRedirect("FineServlet?action=viewAll");
-                    break;
-
-                case "showAddForm":
-                    session.setAttribute("message", "Manual addition of fines is disabled.");
-                    session.setAttribute("status", "error");
-                    response.sendRedirect("FineServlet?action=viewAll");
-                    break;
-
-                case "editForm":
-                    if (!("admin".equals(currentUser.getRole()) || "librarian".equals(currentUser.getRole()))) {
-                        response.sendError(HttpServletResponse.SC_FORBIDDEN, "Access Denied");
-                        return;
-                    }
-
-                    int editFineId = Integer.parseInt(request.getParameter("fineId"));
-                    Fine fine = fineDAO.getFineById(editFineId);
+                    Fine fine = fineDAO.getFineById(fineId);
                     if (fine != null) {
-                        request.setAttribute("fine", fine);
-                        request.getRequestDispatcher("edit_fine.jsp").forward(request, response);
+                        String msg = "تم دفع الغرامة لكتاب '" + fine.getBookTitle()
+                                   + "' (معرّف الغرامة " + fineId + "). شكرًا!";
+                        Timestamp now = new Timestamp(System.currentTimeMillis());
+
+                        nDAO.insertNotification(new Notification(0, fine.getUserId(), msg, "unread", now));
+                        for (User u : userDAO.getUsersByRole("admin"))
+                            nDAO.insertNotification(new Notification(0, u.getUserId(), msg, "unread", now));
+                        for (User u : userDAO.getUsersByRole("librarian"))
+                            nDAO.insertNotification(new Notification(0, u.getUserId(), msg, "unread", now));
+                    }
+
+                    session.setAttribute("message", "Fine marked as paid and notifications sent.");
+                    session.setAttribute("status",  "success");
+                    resp.sendRedirect(ctx + "/FineServlet?action=viewAll");
+                    break;
+                }
+
+                /* ---------------- 3) حذف غرامة ---------------- */
+                case "delete": {
+                    if (!"admin".equalsIgnoreCase(currentUser.getRole())) {
+                        resp.sendError(HttpServletResponse.SC_FORBIDDEN, "Access Denied");
+                        return;
+                    }
+
+                    int  id  = Integer.parseInt(req.getParameter("fineId"));
+                    Fine fin = fineDAO.getFineById(id);
+
+                    if (fin != null) {
+                        fineDAO.deleteFine(id);
+                        txDAO.blockFineForTransaction(fin.getTransactionId());
+
+                        String msg = "تم حذف الغرامة الخاصة بكتاب '" + fin.getBookTitle() + "'.";
+                        Timestamp now = new Timestamp(System.currentTimeMillis());
+
+                        nDAO.insertNotification(new Notification(0, fin.getUserId(), msg, "unread", now));
+                        for (User u : userDAO.getUsersByRole("admin"))
+                            nDAO.insertNotification(new Notification(0, u.getUserId(), msg, "unread", now));
+                        for (User u : userDAO.getUsersByRole("librarian"))
+                            nDAO.insertNotification(new Notification(0, u.getUserId(), msg, "unread", now));
+
+                        session.setAttribute("message", "Fine deleted and notifications sent.");
+                        session.setAttribute("status",  "success");
                     } else {
                         session.setAttribute("message", "Fine not found.");
-                        session.setAttribute("status", "error");
-                        response.sendRedirect("FineServlet?action=viewAll");
+                        session.setAttribute("status",  "error");
+                    }
+                    resp.sendRedirect(ctx + "/FineServlet?action=viewAll");
+                    break;
+                }
+
+                /* -------------- 4) نموذج التعديل -------------- */
+                case "editForm": {
+                    if (!("admin".equalsIgnoreCase(currentUser.getRole())
+                       || "librarian".equalsIgnoreCase(currentUser.getRole()))) {
+                        resp.sendError(HttpServletResponse.SC_FORBIDDEN, "Access Denied");
+                        return;
+                    }
+
+                    int  id = Integer.parseInt(req.getParameter("fineId"));
+                    Fine f  = fineDAO.getFineById(id);
+
+                    if (f != null) {
+                        req.setAttribute("fine", f);
+                        req.getRequestDispatcher("edit_fine.jsp").forward(req, resp);
+                    } else {
+                        session.setAttribute("message", "Fine not found.");
+                        session.setAttribute("status",  "error");
+                        resp.sendRedirect(ctx + "/FineServlet?action=viewAll");
                     }
                     break;
+                }
 
-                default:
-                    response.sendRedirect("FineServlet?action=viewAll");
+                /* ------------- 5) غرامات المستعير ------------- */
+                case "myFines": {
+                  if (!currentUser.getRole().equalsIgnoreCase("patron")) {
+    resp.sendError(HttpServletResponse.SC_FORBIDDEN, "Access Denied");
+    return;
+}
+
+
+                    double rate = 1.0;
+                    SystemConfig cfg = confDAO.getCurrentConfig();
+                    if (cfg != null) rate = cfg.getFineRate();
+                    fineDAO.createFinesForOverdueTransactions(rate);
+
+                    List<Fine> patronFines = fineDAO.getFinesByUser(currentUser.getUserId());
+
+                    req.setAttribute("fines", patronFines);
+                    req.getRequestDispatcher("patron_fines.jsp").forward(req, resp);
                     break;
+                }
+
+                /* ------------------- fallback ------------------ */
+                default:
+                    resp.sendRedirect(ctx + "/FineServlet?action=viewAll");
             }
 
-        } catch (Exception e) {
-            e.printStackTrace();
-            request.setAttribute("error", "Error: " + e.getMessage());
-            request.getRequestDispatcher("fine_list.jsp").forward(request, response);
+        } catch (Exception ex) {
+            ex.printStackTrace();
+            req.setAttribute("error", "Error: " + ex.getMessage());
+            req.getRequestDispatcher("error.jsp").forward(req, resp);
         }
     }
 
+    /* =========================================================
+     *                       POST METHOD
+     * ========================================================= */
     @Override
-    protected void doPost(HttpServletRequest request, HttpServletResponse response)
+    protected void doPost(HttpServletRequest req, HttpServletResponse resp)
             throws ServletException, IOException {
 
-        String action = request.getParameter("action");
+        String ctx    = req.getContextPath();
+        String action = req.getParameter("action");
 
-        HttpSession session = request.getSession();
-        User currentUser = (User) session.getAttribute("currentUser");
+        HttpSession session = req.getSession();
+        User currentUser    = (User) session.getAttribute("currentUser");
         if (currentUser == null) {
-            response.sendRedirect("login.jsp");
+            resp.sendRedirect(ctx + "/login.jsp");
             return;
         }
 
         try (Connection conn = DBConnection.getConnection()) {
-            FineDAO fineDAO = new FineDAO(conn);
-            NotificationDAO notificationDAO = new NotificationDAO(conn);
-            UserDAO userDAO = new UserDAO(conn);
 
-            if ("add".equals(action)) {
-                session.setAttribute("message", "Manual addition of fines is not allowed. Fines are generated automatically.");
-                session.setAttribute("status", "error");
-                response.sendRedirect("FineServlet?action=viewAll");
-                return;
+            FineDAO         fineDAO = new FineDAO(conn);
+            NotificationDAO nDAO    = new NotificationDAO(conn);
+            UserDAO         userDAO = new UserDAO(conn);
+
+            /* ---------- 1) غرامات المستعير (نادرًا ما تكون POST) ---------- */
+            if ("myFines".equals(action)) {
+                List<Fine> fines = fineDAO.getFinesByUser(currentUser.getUserId());
+                req.setAttribute("fines", fines);
+                req.getRequestDispatcher("my_fines.jsp").forward(req, resp);
+                return;     // مهمّ: لا تواصل بعدها
             }
-            else if ("edit".equals(action)) {
-                if (!("admin".equals(currentUser.getRole()) || "librarian".equals(currentUser.getRole()))) {
-                    response.sendError(HttpServletResponse.SC_FORBIDDEN, "Access Denied");
+
+            /* ---------------- 2) تعديل غرامة ---------------- */
+            if ("edit".equals(action)) {
+
+                if (!("admin".equalsIgnoreCase(currentUser.getRole())
+                   || "librarian".equalsIgnoreCase(currentUser.getRole()))) {
+                    resp.sendError(HttpServletResponse.SC_FORBIDDEN, "Access Denied");
                     return;
                 }
 
-                int fineId = Integer.parseInt(request.getParameter("fineId"));
-                double fineAmount = Double.parseDouble(request.getParameter("fineAmount"));
-                String paymentStatus = request.getParameter("paymentStatus");
-                Date paidDate = null;
-                if ("paid".equalsIgnoreCase(paymentStatus)) {
-                    paidDate = Date.valueOf(LocalDate.now());
+                int    id   = Integer.parseInt(req.getParameter("fineId"));
+                double amt  = Double.parseDouble(req.getParameter("fineAmount"));
+                String stat = req.getParameter("paymentStatus");
+
+                Fine oldFine = fineDAO.getFineById(id);
+                if (oldFine == null) {
+                    session.setAttribute("message", "Fine not found.");
+                    session.setAttribute("status",  "error");
+                    resp.sendRedirect(ctx + "/FineServlet?action=viewAll");
+                    return;
                 }
 
-                Fine oldFine = fineDAO.getFineById(fineId); // لجلب البيانات القديمة قبل التعديل
+                Fine f = new Fine();
+                f.setFineId(id);
+                f.setFineAmount(amt);
+                f.setPaymentStatus(stat);
+                f.setPaidDate("paid".equalsIgnoreCase(stat) ? Date.valueOf(LocalDate.now()) : null);
+                fineDAO.updateFine(f);
 
-                Fine fine = new Fine();
-                fine.setFineId(fineId);
-                fine.setFineAmount(fineAmount);
-                fine.setPaymentStatus(paymentStatus);
-                fine.setPaidDate(paidDate);
+                if (!"paid".equalsIgnoreCase(oldFine.getPaymentStatus())
+                 &&  "paid".equalsIgnoreCase(stat)) {
 
-                fineDAO.updateFine(fine);
-
-                // إشعار الجميع عند تغيير الحالة إلى paid
-                if (oldFine != null && !"paid".equalsIgnoreCase(oldFine.getPaymentStatus()) && "paid".equalsIgnoreCase(paymentStatus)) {
-                    String message = "تم تغيير حالة الغرامة لكتاب '" + oldFine.getBookTitle() + "' إلى مدفوعة.";
+                    String msg = "تم دفع الغرامة الخاصة بكتاب '" + oldFine.getBookTitle() + "'.";
                     Timestamp now = new Timestamp(System.currentTimeMillis());
 
-                    // 1. الباترون
-                    notificationDAO.insertNotification(new Notification(
-                        0,
-                        oldFine.getUserId(),
-                        message,
-                        "unread",
-                        now
-                    ));
-                    // 2. الإداريين
-                    List<User> admins = userDAO.getUsersByRole("admin");
-                    List<User> librarians = userDAO.getUsersByRole("librarian");
-                    for (User admin : admins) {
-                        notificationDAO.insertNotification(new Notification(0, admin.getUserId(), message, "unread", now));
-                    }
-                    for (User librarian : librarians) {
-                        notificationDAO.insertNotification(new Notification(0, librarian.getUserId(), message, "unread", now));
-                    }
+                    nDAO.insertNotification(new Notification(0, oldFine.getUserId(), msg, "unread", now));
+                    for (User u : userDAO.getUsersByRole("admin"))
+                        nDAO.insertNotification(new Notification(0, u.getUserId(), msg, "unread", now));
+                    for (User u : userDAO.getUsersByRole("librarian"))
+                        nDAO.insertNotification(new Notification(0, u.getUserId(), msg, "unread", now));
                 }
 
-                session.setAttribute("message", "Fine updated successfully and notifications sent.");
-                session.setAttribute("status", "success");
-                response.sendRedirect("FineServlet?action=viewAll");
-            }
-            else {
-                response.sendRedirect("FineServlet?action=viewAll");
+                session.setAttribute("message", "Fine updated successfully.");
+                session.setAttribute("status",  "success");
+                resp.sendRedirect(ctx + "/FineServlet?action=viewAll");
+                return;
             }
 
-        } catch (Exception e) {
-            e.printStackTrace();
-            request.setAttribute("error", "Error: " + e.getMessage());
-            request.getRequestDispatcher("fine_list.jsp").forward(request, response);
+            /* ---------------- أيّ إجراء آخر ---------------- */
+            resp.sendError(HttpServletResponse.SC_BAD_REQUEST, "Unknown action");
+
+        } catch (Exception ex) {
+            ex.printStackTrace();
+            req.setAttribute("error", "Error: " + ex.getMessage());
+            req.getRequestDispatcher("error.jsp").forward(req, resp);
         }
     }
 }

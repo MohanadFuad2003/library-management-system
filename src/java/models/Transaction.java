@@ -98,6 +98,16 @@ public class Transaction {
     public void setStatus(String status) {
         this.status = status;
     }
+    private String bookTitle; // <-- أضف هذا الحقل
+
+public String getBookTitle() {
+    return bookTitle;
+}
+
+public void setBookTitle(String bookTitle) {
+    this.bookTitle = bookTitle;
+}
+
     private String transactionId;
     private int userId;
     private int bookId;

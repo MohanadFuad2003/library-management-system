@@ -1,4 +1,3 @@
-
 package DAO;
 
 import java.sql.*;
@@ -7,15 +6,24 @@ import java.util.List;
 import models.Book;
 
 public class BookDAO {
-    private Connection conn;
+
+    /* ==========================================================
+     *                       Constructor
+     * ========================================================== */
+    private final Connection conn;
 
     public BookDAO(Connection conn) {
         this.conn = conn;
     }
 
-    // Insert a new book
+    /* ==========================================================
+     *                       CRUD METHODS
+     * ========================================================== */
+
+    /** Insert a new Book into books table */
     public void insertBook(Book book) throws SQLException {
-        String sql = "INSERT INTO books (title, author, isbn, genre, publication_year, availability, description) VALUES (?, ?, ?, ?, ?, ?, ?)";
+        String sql = "INSERT INTO books (title, author, isbn, genre, publication_year, " +
+                     "availability, description) VALUES (?, ?, ?, ?, ?, ?, ?)";
         try (PreparedStatement stmt = conn.prepareStatement(sql)) {
             stmt.setString(1, book.getTitle());
             stmt.setString(2, book.getAuthor());
@@ -27,62 +35,11 @@ public class BookDAO {
             stmt.executeUpdate();
         }
     }
-    
-    
-    public void deleteBookPermanently(int bookId) throws SQLException {
-    String sql = "DELETE FROM deleted_books_archive WHERE book_id = ?";
-    try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-        stmt.setInt(1, bookId);
-        stmt.executeUpdate();
-    }
-}
 
-
-    // Search books by keyword in title or isbn
-    public List<Book> searchBooksByKeyword(String keyword) throws SQLException {
-        List<Book> list = new ArrayList<>();
-        String sql = "SELECT * FROM books WHERE LOWER(title) LIKE ? OR LOWER(isbn) LIKE ?";
-        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            String searchPattern = "%" + keyword.toLowerCase() + "%";
-            stmt.setString(1, searchPattern);
-            stmt.setString(2, searchPattern);
-            ResultSet rs = stmt.executeQuery();
-            while (rs.next()) {
-                list.add(mapResultSetToBook(rs));
-            }
-        }
-        return list;
-    }
-
-    // Get book by ID
-    public Book getBookById(int bookId) throws SQLException {
-        String sql = "SELECT * FROM books WHERE book_id = ?";
-        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setInt(1, bookId);
-            ResultSet rs = stmt.executeQuery();
-            if (rs.next()) {
-                return mapResultSetToBook(rs);
-            }
-        }
-        return null;
-    }
-
-    // Get all books
-    public List<Book> getAllBooks() throws SQLException {
-        List<Book> books = new ArrayList<>();
-        String sql = "SELECT * FROM books";
-        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            ResultSet rs = stmt.executeQuery();
-            while (rs.next()) {
-                books.add(mapResultSetToBook(rs));
-            }
-        }
-        return books;
-    }
-
-    // Update book
+    /** Update an existing Book */
     public void updateBook(Book book) throws SQLException {
-        String sql = "UPDATE books SET title=?, author=?, isbn=?, genre=?, publication_year=?, availability=?, description=? WHERE book_id=?";
+        String sql = "UPDATE books SET title=?, author=?, isbn=?, genre=?, " +
+                     "publication_year=?, availability=?, description=? WHERE book_id=?";
         try (PreparedStatement stmt = conn.prepareStatement(sql)) {
             stmt.setString(1, book.getTitle());
             stmt.setString(2, book.getAuthor());
@@ -96,112 +53,207 @@ public class BookDAO {
         }
     }
 
-    // Delete book: archive data then delete permanently
+    /** Archive a book then remove it from books table */
     public void deleteBook(int bookId) throws SQLException {
-        // Get book details first
         Book book = getBookById(bookId);
-        if (book == null) {
-            throw new SQLException("Book not found with id: " + bookId);
+        if (book == null) throw new SQLException("Book not found with id: " + bookId);
+
+        String insert = "INSERT INTO deleted_books_archive (book_id, title, author, isbn, " +
+                        "genre, publication_year, description) VALUES (?, ?, ?, ?, ?, ?, ?)";
+        try (PreparedStatement in = conn.prepareStatement(insert)) {
+            in.setInt(1, book.getBookId());
+            in.setString(2, book.getTitle());
+            in.setString(3, book.getAuthor());
+            in.setString(4, book.getIsbn());
+            in.setString(5, book.getGenre());
+            in.setInt(6, book.getPublicationYear());
+            in.setString(7, book.getDescription());
+            in.executeUpdate();
         }
 
-        // Insert into deleted_books_archive
-        String insertSql = "INSERT INTO deleted_books_archive (book_id, title, author, isbn, genre, publication_year, description) VALUES (?, ?, ?, ?, ?, ?, ?)";
-        try (PreparedStatement insertStmt = conn.prepareStatement(insertSql)) {
-            insertStmt.setInt(1, book.getBookId());
-            insertStmt.setString(2, book.getTitle());
-            insertStmt.setString(3, book.getAuthor());
-            insertStmt.setString(4, book.getIsbn());
-            insertStmt.setString(5, book.getGenre());
-            insertStmt.setInt(6, book.getPublicationYear());
-            insertStmt.setString(7, book.getDescription());
-            insertStmt.executeUpdate();
-        }
-
-        // Delete from books table
-        String deleteSql = "DELETE FROM books WHERE book_id = ?";
-        try (PreparedStatement deleteStmt = conn.prepareStatement(deleteSql)) {
-            deleteStmt.setInt(1, bookId);
-            deleteStmt.executeUpdate();
+        try (PreparedStatement del =
+                     conn.prepareStatement("DELETE FROM books WHERE book_id = ?")) {
+            del.setInt(1, bookId);
+            del.executeUpdate();
         }
     }
 
-    // Search books by title
-    public List<Book> searchBooksByTitle(String title) throws SQLException {
-        List<Book> books = new ArrayList<>();
-        String sql = "SELECT * FROM books WHERE LOWER(title) LIKE ?";
-        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setString(1, "%" + title.toLowerCase() + "%");
-            ResultSet rs = stmt.executeQuery();
-            while (rs.next()) {
-                books.add(mapResultSetToBook(rs));
+    /** Permanently delete a book from archive */
+    public void deleteBookPermanently(int bookId) throws SQLException {
+        try (PreparedStatement stmt =
+                     conn.prepareStatement("DELETE FROM deleted_books_archive WHERE book_id = ?")) {
+            stmt.setInt(1, bookId);
+            stmt.executeUpdate();
+        }
+    }
+
+    /** Restore a book from archive back to books table */
+    public void restoreBook(int bookId) throws SQLException {
+        String select = "SELECT * FROM deleted_books_archive WHERE book_id = ?";
+        Book book;
+        try (PreparedStatement st = conn.prepareStatement(select)) {
+            st.setInt(1, bookId);
+            try (ResultSet rs = st.executeQuery()) {
+                if (!rs.next())
+                    throw new SQLException("Book not found in archive with id: " + bookId);
+                book = mapResultSetToBook(rs);
+                book.setAvailability("available");
             }
         }
-        return books;
+
+        String insert = "INSERT INTO books (book_id, title, author, isbn, genre, " +
+                        "publication_year, availability, description) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+        try (PreparedStatement in = conn.prepareStatement(insert)) {
+            in.setInt(1, book.getBookId());
+            in.setString(2, book.getTitle());
+            in.setString(3, book.getAuthor());
+            in.setString(4, book.getIsbn());
+            in.setString(5, book.getGenre());
+            in.setInt(6, book.getPublicationYear());
+            in.setString(7, book.getAvailability());
+            in.setString(8, book.getDescription());
+            in.executeUpdate();
+        }
+
+        try (PreparedStatement del =
+                     conn.prepareStatement("DELETE FROM deleted_books_archive WHERE book_id = ?")) {
+            del.setInt(1, bookId);
+            del.executeUpdate();
+        }
     }
 
-    // Search books by author
-    public List<Book> searchBooksByAuthor(String author) throws SQLException {
-        List<Book> books = new ArrayList<>();
-        String sql = "SELECT * FROM books WHERE LOWER(author) LIKE ?";
+    /* ==========================================================
+     *                       FETCH METHODS
+     * ========================================================== */
+
+    /** Get book by primary key */
+    public Book getBookById(int bookId) throws SQLException {
+        String sql = "SELECT * FROM books WHERE book_id = ?";
         try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setString(1, "%" + author.toLowerCase() + "%");
-            ResultSet rs = stmt.executeQuery();
-            while (rs.next()) {
-                books.add(mapResultSetToBook(rs));
+            stmt.setInt(1, bookId);
+            try (ResultSet rs = stmt.executeQuery()) {
+                return rs.next() ? mapResultSetToBook(rs) : null;
             }
         }
-        return books;
     }
 
-    // Get books sorted by publication year descending
-    public List<Book> getBooksSortedByYear() throws SQLException {
-        List<Book> books = new ArrayList<>();
-        String sql = "SELECT * FROM books ORDER BY publication_year DESC";
-        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            ResultSet rs = stmt.executeQuery();
-            while (rs.next()) {
-                books.add(mapResultSetToBook(rs));
-            }
-        }
-        return books;
-    }
-
-    // Get book by ISBN
+    /** Get book by ISBN */
     public Book getBookByISBN(String isbn) throws SQLException {
         String sql = "SELECT * FROM books WHERE isbn = ?";
         try (PreparedStatement stmt = conn.prepareStatement(sql)) {
             stmt.setString(1, isbn);
-            ResultSet rs = stmt.executeQuery();
-            if (rs.next()) {
-                return mapResultSetToBook(rs);
+            try (ResultSet rs = stmt.executeQuery()) {
+                return rs.next() ? mapResultSetToBook(rs) : null;
             }
         }
-        return null;
     }
 
-    // Get deleted books from archive
-    public List<Book> getDeletedBooks() throws SQLException {
-        List<Book> deletedBooks = new ArrayList<>();
-        String sql = "SELECT book_id, title, author, isbn, genre, publication_year, description FROM deleted_books_archive ORDER BY deleted_date DESC";
+    /** Return every row in books table */
+    public List<Book> getAllBooks() throws SQLException {
+        List<Book> list = new ArrayList<>();
+        try (PreparedStatement stmt = conn.prepareStatement("SELECT * FROM books");
+             ResultSet rs = stmt.executeQuery()) {
+            while (rs.next()) list.add(mapResultSetToBook(rs));
+        }
+        return list;
+    }
+
+    /** Get books filtered by availability */
+    public List<Book> getBooksByAvailability(String status) throws SQLException {
+        List<Book> list = new ArrayList<>();
+        String sql = "SELECT * FROM books WHERE LOWER(availability)=?";
         try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            ResultSet rs = stmt.executeQuery();
-            while (rs.next()) {
-                Book book = new Book();
-                book.setBookId(rs.getInt("book_id"));
-                book.setTitle(rs.getString("title"));
-                book.setAuthor(rs.getString("author"));
-                book.setIsbn(rs.getString("isbn"));
-                book.setGenre(rs.getString("genre"));
-                book.setPublicationYear(rs.getInt("publication_year"));
-                book.setDescription(rs.getString("description"));
-                book.setAvailability("deleted"); // mark as deleted
-                deletedBooks.add(book);
+            stmt.setString(1, status.toLowerCase());
+            try (ResultSet rs = stmt.executeQuery()) {
+                while (rs.next()) list.add(mapResultSetToBook(rs));
             }
         }
-        return deletedBooks;
+        return list;
     }
 
-    // Helper: convert ResultSet to Book object
+    /** Search by keyword in title, author, or ISBN (case-insensitive) */
+    public List<Book> searchBooksByKeyword(String keyword) throws SQLException {
+        List<Book> list = new ArrayList<>();
+        String sql = "SELECT * FROM books WHERE LOWER(title) LIKE ? OR LOWER(author) LIKE ? OR LOWER(isbn) LIKE ?";
+        String pattern = "%" + keyword.toLowerCase() + "%";
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, pattern);
+            stmt.setString(2, pattern);
+            stmt.setString(3, pattern);
+            try (ResultSet rs = stmt.executeQuery()) {
+                while (rs.next()) list.add(mapResultSetToBook(rs));
+            }
+        }
+        return list;
+    }
+
+    /** Search by title only */
+    public List<Book> searchBooksByTitle(String title) throws SQLException {
+        return searchBySingleColumn("title", title);
+    }
+
+    /** Search by author only */
+    public List<Book> searchBooksByAuthor(String author) throws SQLException {
+        return searchBySingleColumn("author", author);
+    }
+
+    /* ==========================================================
+     *                     SORTING METHODS
+     * ========================================================== */
+
+    /** Books sorted by publication year ASC */
+    public List<Book> getBooksSortedByYearAsc() throws SQLException {
+        return getBooksSortedByYear(true);
+    }
+
+    /** Books sorted by publication year DESC */
+    public List<Book> getBooksSortedByYearDesc() throws SQLException {
+        return getBooksSortedByYear(false);
+    }
+
+    /** Books sorted by publication year (helper) */
+    private List<Book> getBooksSortedByYear(boolean asc) throws SQLException {
+        List<Book> list = new ArrayList<>();
+        String sql = "SELECT * FROM books ORDER BY publication_year " + (asc ? "ASC" : "DESC");
+        try (PreparedStatement stmt = conn.prepareStatement(sql);
+             ResultSet rs = stmt.executeQuery()) {
+            while (rs.next()) list.add(mapResultSetToBook(rs));
+        }
+        return list;
+    }
+
+    /* ==========================================================
+     *               DELETED BOOKS (ARCHIVE) METHODS
+     * ========================================================== */
+
+    /** Fetch deleted books from archive table */
+    public List<Book> getDeletedBooks() throws SQLException {
+        List<Book> deleted = new ArrayList<>();
+        String sql = "SELECT book_id, title, author, isbn, genre, publication_year, description " +
+                     "FROM deleted_books_archive ORDER BY deleted_date DESC";
+        try (PreparedStatement stmt = conn.prepareStatement(sql);
+             ResultSet rs = stmt.executeQuery()) {
+            while (rs.next()) {
+                Book b = new Book();
+                b.setBookId(rs.getInt("book_id"));
+                b.setTitle(rs.getString("title"));
+                b.setAuthor(rs.getString("author"));
+                b.setIsbn(rs.getString("isbn"));
+                b.setGenre(rs.getString("genre"));
+                b.setPublicationYear(rs.getInt("publication_year"));
+                b.setDescription(rs.getString("description"));
+                b.setAvailability("deleted");
+                deleted.add(b);
+            }
+        }
+        return deleted;
+    }
+
+    /* ==========================================================
+     *                     PRIVATE UTILITIES
+     * ========================================================== */
+
+    /** Map current ResultSet row to Book object */
     private Book mapResultSetToBook(ResultSet rs) throws SQLException {
         Book book = new Book();
         book.setBookId(rs.getInt("book_id"));
@@ -215,87 +267,16 @@ public class BookDAO {
         return book;
     }
 
-    // Get books by availability status
-    public List<Book> getBooksByAvailability(String status) throws SQLException {
+    /** Generic search by single column (title, author) */
+    private List<Book> searchBySingleColumn(String column, String value) throws SQLException {
         List<Book> list = new ArrayList<>();
-        String sql = "SELECT * FROM books WHERE LOWER(availability) = ?";
+        String sql = "SELECT * FROM books WHERE LOWER(" + column + ") LIKE ?";
         try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setString(1, status.toLowerCase());
-            ResultSet rs = stmt.executeQuery();
-            while (rs.next()) {
-                list.add(mapResultSetToBook(rs));
+            stmt.setString(1, "%" + value.toLowerCase() + "%");
+            try (ResultSet rs = stmt.executeQuery()) {
+                while (rs.next()) list.add(mapResultSetToBook(rs));
             }
         }
         return list;
     }
-
-    public List<Book> getBooksSortedByYearAsc() throws SQLException {
-        List<Book> books = new ArrayList<>();
-        String sql = "SELECT * FROM books ORDER BY publication_year ASC";
-        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            ResultSet rs = stmt.executeQuery();
-            while (rs.next()) {
-                books.add(mapResultSetToBook(rs));
-            }
-        }
-        return books;
-    }
-
-    public List<Book> getBooksSortedByYearDesc() throws SQLException {
-        List<Book> books = new ArrayList<>();
-        String sql = "SELECT * FROM books ORDER BY publication_year DESC";
-        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            ResultSet rs = stmt.executeQuery();
-            while (rs.next()) {
-                books.add(mapResultSetToBook(rs));
-            }
-        }
-        return books;
-    }
-    
-    public void restoreBook(int bookId) throws SQLException {
-    // 1. جلب بيانات الكتاب من جدول deleted_books_archive
-    String selectSql = "SELECT * FROM deleted_books_archive WHERE book_id = ?";
-    Book book = null;
-    try (PreparedStatement selectStmt = conn.prepareStatement(selectSql)) {
-        selectStmt.setInt(1, bookId);
-        ResultSet rs = selectStmt.executeQuery();
-        if (rs.next()) {
-            book = new Book();
-            book.setBookId(rs.getInt("book_id"));
-            book.setTitle(rs.getString("title"));
-            book.setAuthor(rs.getString("author"));
-            book.setIsbn(rs.getString("isbn"));
-            book.setGenre(rs.getString("genre"));
-            book.setPublicationYear(rs.getInt("publication_year"));
-            book.setDescription(rs.getString("description"));
-            book.setAvailability("available"); // افتراضاً يعاد كمتاح
-        } else {
-            throw new SQLException("Book not found in archive with id: " + bookId);
-        }
-    }
-
-    // 2. إدخال الكتاب في جدول books
-    String insertSql = "INSERT INTO books (book_id, title, author, isbn, genre, publication_year, availability, description) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
-    try (PreparedStatement insertStmt = conn.prepareStatement(insertSql)) {
-        insertStmt.setInt(1, book.getBookId());
-        insertStmt.setString(2, book.getTitle());
-        insertStmt.setString(3, book.getAuthor());
-        insertStmt.setString(4, book.getIsbn());
-        insertStmt.setString(5, book.getGenre());
-        insertStmt.setInt(6, book.getPublicationYear());
-        insertStmt.setString(7, book.getAvailability());
-        insertStmt.setString(8, book.getDescription());
-        insertStmt.executeUpdate();
-    }
-
-    // 3. حذف الكتاب من جدول deleted_books_archive
-    String deleteSql = "DELETE FROM deleted_books_archive WHERE book_id = ?";
-    try (PreparedStatement deleteStmt = conn.prepareStatement(deleteSql)) {
-        deleteStmt.setInt(1, bookId);
-        deleteStmt.executeUpdate();
-    }
-}
-
-
 }

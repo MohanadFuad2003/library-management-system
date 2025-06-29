@@ -1,6 +1,5 @@
 package Controller;
 
-
 import models.User;
 import DAO.UserDAO;
 import Util.DBConnection;
@@ -9,8 +8,6 @@ import javax.servlet.*;
 import javax.servlet.http.*;
 import java.io.IOException;
 import java.sql.Connection;
-
-
 
 public class LoginServlet extends HttpServlet {
 
@@ -54,7 +51,7 @@ public class LoginServlet extends HttpServlet {
                     response.sendRedirect("librarian_dashboard.jsp");
                     break;
                 case "patron":
-                    response.sendRedirect("patron_home.jsp");
+                    response.sendRedirect("patron_dashboard.jsp");
                     break;
                 default:
                     request.setAttribute("error", "Unknown role.");

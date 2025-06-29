@@ -8,294 +8,308 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 
-
-
-
 public class FineDAO {
-    private Connection conn;
+
+    private final Connection conn;
 
     public FineDAO(Connection conn) {
         this.conn = conn;
     }
 
-    // إدخال غرامة جديدة
+    /* ==========================================================
+     *                INSERT / UPDATE / DELETE
+     * ========================================================== */
+
+    /** إدخال غرامة جديدة */
     public void insertFine(Fine fine) throws SQLException {
-        String sql = "INSERT INTO fines (transaction_id, fine_amount, payment_status, paid_date) VALUES (?, ?, ?, ?)";
-        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setString(1, fine.getTransactionId());
-            stmt.setDouble(2, fine.getFineAmount());
-            stmt.setString(3, fine.getPaymentStatus());
+        String sql = "INSERT INTO fines (transaction_id, fine_amount, payment_status, paid_date) "
+                   + "VALUES (?,?,?,?)";
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, fine.getTransactionId());
+            ps.setDouble(2, fine.getFineAmount());
+            ps.setString(3, fine.getPaymentStatus());
             if (fine.getPaidDate() != null) {
-                stmt.setDate(4, fine.getPaidDate());
+                ps.setDate(4, fine.getPaidDate());
             } else {
-                stmt.setNull(4, Types.DATE);
+                ps.setNull(4, Types.DATE);
             }
-            stmt.executeUpdate();
+            ps.executeUpdate();
         }
     }
 
-    // تحديث حالة الدفع وتاريخ الدفع
+    /** وضع الغرامة كمدفوعة */
     public void markFineAsPaid(int fineId, Date paidDate) throws SQLException {
         String sql = "UPDATE fines SET payment_status = 'paid', paid_date = ? WHERE fine_id = ?";
-        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setDate(1, paidDate);
-            stmt.setInt(2, fineId);
-            stmt.executeUpdate();
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setDate(1, paidDate);
+            ps.setInt (2, fineId);
+            ps.executeUpdate();
         }
     }
 
-    // حذف غرامة
+    /** حذف غرامة */
     public void deleteFine(int fineId) throws SQLException {
-        String sql = "DELETE FROM fines WHERE fine_id = ?";
-        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setInt(1, fineId);
-            stmt.executeUpdate();
+        try (PreparedStatement ps =
+                 conn.prepareStatement("DELETE FROM fines WHERE fine_id = ?")) {
+            ps.setInt(1, fineId);
+            ps.executeUpdate();
         }
     }
 
-    // تعديل بيانات الغرامة
+    /** تعديل مبلغ أو حالة الغرامة */
     public void updateFine(Fine fine) throws SQLException {
         String sql = "UPDATE fines SET fine_amount = ?, payment_status = ?, paid_date = ? WHERE fine_id = ?";
-        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setDouble(1, fine.getFineAmount());
-            stmt.setString(2, fine.getPaymentStatus());
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setDouble(1, fine.getFineAmount());
+            ps.setString(2, fine.getPaymentStatus());
             if (fine.getPaidDate() != null) {
-                stmt.setDate(3, fine.getPaidDate());
+                ps.setDate(3, fine.getPaidDate());
             } else {
-                stmt.setNull(3, Types.DATE);
+                ps.setNull(3, Types.DATE);
             }
-            stmt.setInt(4, fine.getFineId());
-            stmt.executeUpdate();
+            ps.setInt(4, fine.getFineId());
+            ps.executeUpdate();
         }
     }
 
-    // جلب غرامة حسب رقم الغرامة (مع تفاصيل المستخدم والكتاب)
+    /* ==========================================================
+     *                           GET
+     * ========================================================== */
+
+    /** جلب غرامة (كاملة التفاصيل) حسب ID */
     public Fine getFineById(int fineId) throws SQLException {
-        String sql = "SELECT f.fine_id, f.transaction_id, f.fine_amount, f.payment_status, f.paid_date, " +
-                     "u.user_id, u.first_name, u.last_name, b.book_id, b.title, t.borrow_date, t.due_date " +
-                     "FROM fines f " +
-                     "JOIN transactions t ON f.transaction_id = t.transaction_id " +
-                     "JOIN users u ON t.user_id = u.user_id " +
-                     "JOIN books b ON t.book_id = b.book_id " +
-                     "WHERE f.fine_id = ?";
-        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setInt(1, fineId);
-            ResultSet rs = stmt.executeQuery();
+        String sql = "SELECT f.fine_id, f.transaction_id, f.fine_amount, f.payment_status, f.paid_date, "
+                   + "u.user_id, u.first_name, u.last_name, b.book_id, b.title, t.borrow_date, t.due_date "
+                   + "FROM fines f "
+                   + "JOIN transactions t ON f.transaction_id = t.transaction_id "
+                   + "JOIN users u        ON t.user_id       = u.user_id "
+                   + "JOIN books b        ON t.book_id       = b.book_id "
+                   + "WHERE f.fine_id = ?";
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setInt(1, fineId);
+            ResultSet rs = ps.executeQuery();
             if (rs.next()) {
-                Fine fine = mapResultSetToFine(rs);
-                fine.setUserId(rs.getInt("user_id"));
-                fine.setUserFirstName(rs.getString("first_name"));
-                fine.setUserLastName(rs.getString("last_name"));
-                fine.setBookId(rs.getInt("book_id"));
-                fine.setBookTitle(rs.getString("title"));
-                fine.setBorrowDate(rs.getDate("borrow_date"));
-                fine.setDueDate(rs.getDate("due_date"));
-                return fine;
+                return mapWithDetails(rs);
             }
         }
         return null;
     }
 
-    // جلب غرامة حسب transaction_id (مع الحقول الأساسية فقط)
-    public Fine getFineByTransactionId(String transactionId) throws SQLException {
-        String sql = "SELECT * FROM fines WHERE transaction_id = ?";
-        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setString(1, transactionId);
-            ResultSet rs = stmt.executeQuery();
-            if (rs.next()) {
-                return mapResultSetToFine(rs);
-            }
+    /** جلب غرامة (حقول أساسيّة) عبر Transaction ID */
+    public Fine getFineByTransactionId(String txId) throws SQLException {
+        try (PreparedStatement ps =
+                 conn.prepareStatement("SELECT * FROM fines WHERE transaction_id = ?")) {
+            ps.setString(1, txId);
+            ResultSet rs = ps.executeQuery();
+            return rs.next() ? mapBasic(rs) : null;
         }
-        return null;
     }
 
-    // التأكد من وجود غرامة لمعاملة معينة
-    public boolean existsFineForTransaction(String transactionId) throws SQLException {
-        String sql = "SELECT COUNT(*) FROM fines WHERE transaction_id = ?";
-        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setString(1, transactionId);
-            ResultSet rs = stmt.executeQuery();
-            if (rs.next()) {
-                return rs.getInt(1) > 0;
-            }
+    /** التحقّق من وجود غرامة لمعاملة معيّنة */
+    public boolean existsFineForTransaction(String txId) throws SQLException {
+        try (PreparedStatement ps =
+                 conn.prepareStatement("SELECT COUNT(*) FROM fines WHERE transaction_id = ?")) {
+            ps.setString(1, txId);
+            ResultSet rs = ps.executeQuery();
+            return rs.next() && rs.getInt(1) > 0;
         }
-        return false;
     }
 
-    // جلب كل الغرامات مع بيانات المستخدم والكتاب
+    /** جميع الغرامات بالتفاصيل */
     public List<Fine> getAllFinesDetailed() throws SQLException {
-        List<Fine> fines = new ArrayList<>();
-        String sql = "SELECT f.fine_id, f.transaction_id, f.fine_amount, f.payment_status, f.paid_date, " +
-                     "u.user_id, u.first_name, u.last_name, b.book_id, b.title, t.borrow_date, t.due_date " +
-                     "FROM fines f " +
-                     "JOIN transactions t ON f.transaction_id = t.transaction_id " +
-                     "JOIN users u ON t.user_id = u.user_id " +
-                     "JOIN books b ON t.book_id = b.book_id " +
-                     "ORDER BY f.payment_status, f.fine_id DESC";
-        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            ResultSet rs = stmt.executeQuery();
+        String sql = "SELECT f.fine_id, f.transaction_id, f.fine_amount, f.payment_status, f.paid_date, "
+                   + "u.user_id, u.first_name, u.last_name, b.book_id, b.title, t.borrow_date, t.due_date "
+                   + "FROM fines f "
+                   + "JOIN transactions t ON f.transaction_id = t.transaction_id "
+                   + "JOIN users u        ON t.user_id       = u.user_id "
+                   + "JOIN books b        ON t.book_id       = b.book_id "
+                   + "ORDER BY f.payment_status, f.fine_id DESC";
+        try (PreparedStatement ps = conn.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+            List<Fine> list = new ArrayList<>();
             while (rs.next()) {
-                Fine fine = mapResultSetToFine(rs);
-                fine.setUserId(rs.getInt("user_id"));
-                fine.setUserFirstName(rs.getString("first_name"));
-                fine.setUserLastName(rs.getString("last_name"));
-                fine.setBookId(rs.getInt("book_id"));
-                fine.setBookTitle(rs.getString("title"));
-                fine.setBorrowDate(rs.getDate("borrow_date"));
-                fine.setDueDate(rs.getDate("due_date"));
-                fines.add(fine);
+                list.add(mapWithDetails(rs));
             }
+            return list;
         }
-        return fines;
     }
 
-    // جلب الغرامات غير المدفوعة فقط
+    /** الغرامات غير المدفوعة */
     public List<Fine> getUnpaidFines() throws SQLException {
-        List<Fine> fines = new ArrayList<>();
-        String sql = "SELECT f.fine_id, f.transaction_id, f.fine_amount, f.payment_status, f.paid_date, " +
-                     "u.user_id, u.first_name, u.last_name, b.book_id, b.title, t.borrow_date, t.due_date " +
-                     "FROM fines f " +
-                     "JOIN transactions t ON f.transaction_id = t.transaction_id " +
-                     "JOIN users u ON t.user_id = u.user_id " +
-                     "JOIN books b ON t.book_id = b.book_id " +
-                     "WHERE f.payment_status = 'unpaid' " +
-                     "ORDER BY f.fine_id DESC";
-        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            ResultSet rs = stmt.executeQuery();
+        String sql = "SELECT f.fine_id, f.transaction_id, f.fine_amount, f.payment_status, f.paid_date, "
+                   + "u.user_id, u.first_name, u.last_name, b.book_id, b.title, t.borrow_date, t.due_date "
+                   + "FROM fines f "
+                   + "JOIN transactions t ON f.transaction_id = t.transaction_id "
+                   + "JOIN users u        ON t.user_id       = u.user_id "
+                   + "JOIN books b        ON t.book_id       = b.book_id "
+                   + "WHERE f.payment_status = 'unpaid' "
+                   + "ORDER BY f.fine_id DESC";
+        try (PreparedStatement ps = conn.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+            List<Fine> list = new ArrayList<>();
             while (rs.next()) {
-                Fine fine = mapResultSetToFine(rs);
-                fine.setUserId(rs.getInt("user_id"));
-                fine.setUserFirstName(rs.getString("first_name"));
-                fine.setUserLastName(rs.getString("last_name"));
-                fine.setBookId(rs.getInt("book_id"));
-                fine.setBookTitle(rs.getString("title"));
-                fine.setBorrowDate(rs.getDate("borrow_date"));
-                fine.setDueDate(rs.getDate("due_date"));
-                fines.add(fine);
+                list.add(mapWithDetails(rs));
             }
+            return list;
         }
-        return fines;
     }
 
-    // جلب مجموع الغرامات المدفوعة
+    /** مجموع الغرامات المدفوعة */
     public double getTotalFinesCollected() throws SQLException {
-        String sql = "SELECT NVL(SUM(fine_amount), 0) AS total FROM fines WHERE payment_status = 'paid'";
-        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            ResultSet rs = stmt.executeQuery();
-            if (rs.next()) {
-                return rs.getDouble("total");
-            }
+        try (PreparedStatement ps =
+                 conn.prepareStatement("SELECT COALESCE(SUM(fine_amount), 0) "
+                                      + "FROM fines WHERE payment_status = 'paid'");
+             ResultSet rs = ps.executeQuery()) {
+            return rs.next() ? rs.getDouble(1) : 0.0;
         }
-        return 0.0;
     }
 
-    // جلب الغرامات مع الفلاتر (اسم مستخدم أو عنوان كتاب أو حالة دفع)
-    public List<Fine> getFinesWithFilters(String searchUser, String searchBook, String searchStatus) throws SQLException {
-        List<Fine> fines = new ArrayList<>();
-        StringBuilder sql = new StringBuilder(
-            "SELECT f.fine_id, f.transaction_id, f.fine_amount, f.payment_status, f.paid_date, " +
-            "u.user_id, u.first_name, u.last_name, b.book_id, b.title, t.borrow_date, t.due_date " +
-            "FROM fines f " +
-            "JOIN transactions t ON f.transaction_id = t.transaction_id " +
-            "JOIN users u ON t.user_id = u.user_id " +
-            "JOIN books b ON t.book_id = b.book_id " +
-            "WHERE 1=1 "
-        );
+    /** البحث باستخدام فلاتر */
+    public List<Fine> getFinesWithFilters(String user, String book, String status) throws SQLException {
+        StringBuilder sb = new StringBuilder(
+            "SELECT f.fine_id, f.transaction_id, f.fine_amount, f.payment_status, f.paid_date, "
+          + "u.user_id, u.first_name, u.last_name, b.book_id, b.title, t.borrow_date, t.due_date "
+          + "FROM fines f "
+          + "JOIN transactions t ON f.transaction_id = t.transaction_id "
+          + "JOIN users u        ON t.user_id       = u.user_id "
+          + "JOIN books b        ON t.book_id       = b.book_id "
+          + "WHERE 1 = 1 ");
         List<Object> params = new ArrayList<>();
 
-        if (searchUser != null && !searchUser.trim().isEmpty()) {
-            sql.append(" AND (LOWER(u.first_name) LIKE ? OR LOWER(u.last_name) LIKE ?) ");
-            String likeUser = "%" + searchUser.trim().toLowerCase() + "%";
-            params.add(likeUser);
-            params.add(likeUser);
+        if (user != null && !user.trim().isEmpty()) {
+            sb.append("AND (LOWER(u.first_name) LIKE ? OR LOWER(u.last_name) LIKE ?) ");
+            String like = "%" + user.trim().toLowerCase() + "%";
+            params.add(like);
+            params.add(like);
         }
-        if (searchBook != null && !searchBook.trim().isEmpty()) {
-            sql.append(" AND LOWER(b.title) LIKE ? ");
-            params.add("%" + searchBook.trim().toLowerCase() + "%");
+        if (book != null && !book.trim().isEmpty()) {
+            sb.append("AND LOWER(b.title) LIKE ? ");
+            params.add("%" + book.trim().toLowerCase() + "%");
         }
-        if (searchStatus != null && !searchStatus.trim().isEmpty()) {
-            sql.append(" AND LOWER(f.payment_status) = ? ");
-            params.add(searchStatus.trim().toLowerCase());
+        if (status != null && !status.trim().isEmpty()) {
+            sb.append("AND LOWER(f.payment_status) = ? ");
+            params.add(status.trim().toLowerCase());
         }
-        sql.append(" ORDER BY f.fine_id DESC");
+        sb.append("ORDER BY f.fine_id DESC");
 
-        try (PreparedStatement stmt = conn.prepareStatement(sql.toString())) {
+        try (PreparedStatement ps = conn.prepareStatement(sb.toString())) {
             for (int i = 0; i < params.size(); i++) {
-                stmt.setObject(i + 1, params.get(i));
+                ps.setObject(i + 1, params.get(i));
             }
-            ResultSet rs = stmt.executeQuery();
+            ResultSet rs = ps.executeQuery();
+            List<Fine> list = new ArrayList<>();
             while (rs.next()) {
-                Fine fine = mapResultSetToFine(rs);
-                fine.setUserId(rs.getInt("user_id"));
-                fine.setUserFirstName(rs.getString("first_name"));
-                fine.setUserLastName(rs.getString("last_name"));
-                fine.setBookId(rs.getInt("book_id"));
-                fine.setBookTitle(rs.getString("title"));
-                fine.setBorrowDate(rs.getDate("borrow_date"));
-                fine.setDueDate(rs.getDate("due_date"));
-                fines.add(fine);
+                list.add(mapWithDetails(rs));
             }
-        }
-        return fines;
-    }
-
-    // إنشاء غرامات تلقائياً لكل المعاملات المتأخرة (مرجعة متأخرة أو لم تُرجع بعد)
-    public void createFinesForOverdueTransactions(double finePerDay) throws SQLException {
-        // غرامات للكتب غير المرجعة والمتأخرة
-        String sql = "SELECT t.transaction_id, t.due_date FROM transactions t " +
-                "WHERE t.due_date < CURRENT_DATE AND t.return_date IS NULL " +
-                "AND (t.fine_blocked = 0 OR t.fine_blocked IS NULL) " +
-                "AND NOT EXISTS (SELECT 1 FROM fines f WHERE f.transaction_id = t.transaction_id)";
-        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            ResultSet rs = stmt.executeQuery();
-            while (rs.next()) {
-                String transactionId = rs.getString("transaction_id");
-                Date dueDate = rs.getDate("due_date");
-                long daysOverdue = ChronoUnit.DAYS.between(dueDate.toLocalDate(), LocalDate.now());
-                double amount = daysOverdue * finePerDay;
-                if (amount > 0) {
-                    String insertSql = "INSERT INTO fines (transaction_id, fine_amount, payment_status) VALUES (?, ?, 'unpaid')";
-                    try (PreparedStatement insertStmt = conn.prepareStatement(insertSql)) {
-                        insertStmt.setString(1, transactionId);
-                        insertStmt.setDouble(2, amount);
-                        insertStmt.executeUpdate();
-                    }
-                }
-            }
-        }
-        // غرامات للكتب التي تم إرجاعها متأخرة
-        String sql2 = "SELECT t.transaction_id, t.due_date, t.return_date FROM transactions t " +
-                "WHERE t.return_date IS NOT NULL AND t.return_date > t.due_date " +
-                "AND (t.fine_blocked = 0 OR t.fine_blocked IS NULL) " +
-                "AND NOT EXISTS (SELECT 1 FROM fines f WHERE f.transaction_id = t.transaction_id)";
-        try (PreparedStatement stmt = conn.prepareStatement(sql2)) {
-            ResultSet rs = stmt.executeQuery();
-            while (rs.next()) {
-                String transactionId = rs.getString("transaction_id");
-                Date dueDate = rs.getDate("due_date");
-                Date returnDate = rs.getDate("return_date");
-                long daysOverdue = ChronoUnit.DAYS.between(dueDate.toLocalDate(), returnDate.toLocalDate());
-                double amount = daysOverdue * finePerDay;
-                if (amount > 0) {
-                    String insertSql = "INSERT INTO fines (transaction_id, fine_amount, payment_status) VALUES (?, ?, 'unpaid')";
-                    try (PreparedStatement insertStmt = conn.prepareStatement(insertSql)) {
-                        insertStmt.setString(1, transactionId);
-                        insertStmt.setDouble(2, amount);
-                        insertStmt.executeUpdate();
-                    }
-                }
-            }
+            return list;
         }
     }
 
-    // دالة مساعدة لتحويل ResultSet إلى Fine
-    private Fine mapResultSetToFine(ResultSet rs) throws SQLException {
-        Fine fine = new Fine();
-        fine.setFineId(rs.getInt("fine_id"));
-        fine.setTransactionId(rs.getString("transaction_id"));
-        fine.setFineAmount(rs.getDouble("fine_amount"));
-        fine.setPaymentStatus(rs.getString("payment_status"));
-        fine.setPaidDate(rs.getDate("paid_date"));
-        return fine;
+    /** غرامات مستخدم محدّد */
+    public List<Fine> getFinesByUser(int userId) throws SQLException {
+        String sql = "SELECT f.fine_id, f.transaction_id, f.fine_amount, f.payment_status, f.paid_date, "
+                   + "u.user_id, u.first_name, u.last_name, b.book_id, b.title, t.borrow_date, t.due_date "
+                   + "FROM fines f "
+                   + "JOIN transactions t ON f.transaction_id = t.transaction_id "
+                   + "JOIN users u        ON t.user_id       = u.user_id "
+                   + "JOIN books b        ON t.book_id       = b.book_id "
+                   + "WHERE u.user_id = ? "
+                   + "ORDER BY f.fine_id DESC";
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setInt(1, userId);
+            ResultSet rs = ps.executeQuery();
+            List<Fine> list = new ArrayList<>();
+            while (rs.next()) {
+                list.add(mapWithDetails(rs));
+            }
+            return list;
+        }
+    }
+
+    /* ==========================================================
+     *      إنشاء غرامات تلقائيًا للمعاملات المتأخّرة
+     * ========================================================== */
+
+    public void createFinesForOverdueTransactions(double ratePerDay) throws SQLException {
+
+        /* أ. معاملات لم تُرجع بعد وقد تجاوزت تاريخ الاستحقاق */
+        String q1 = "SELECT transaction_id, due_date "
+                   + "FROM transactions "
+                   + "WHERE due_date < CURRENT_DATE "
+                   + "  AND return_date IS NULL "
+                   + "  AND NOT EXISTS (SELECT 1 FROM fines WHERE transaction_id = transactions.transaction_id)";
+        try (PreparedStatement ps = conn.prepareStatement(q1);
+             ResultSet rs = ps.executeQuery()) {
+
+            while (rs.next()) {
+                String txId = rs.getString("transaction_id");
+                Date   due  = rs.getDate("due_date");
+                long   days = ChronoUnit.DAYS.between(due.toLocalDate(), LocalDate.now());
+                double amt  = days * ratePerDay;
+                if (amt > 0) {
+                    insertAutoFine(txId, amt);
+                }
+            }
+        }
+
+        /* ب. معاملات أُعيدت بعد موعد الاستحقاق */
+        String q2 = "SELECT transaction_id, due_date, return_date "
+                   + "FROM transactions "
+                   + "WHERE return_date IS NOT NULL "
+                   + "  AND return_date > due_date "
+                   + "  AND NOT EXISTS (SELECT 1 FROM fines WHERE transaction_id = transactions.transaction_id)";
+        try (PreparedStatement ps = conn.prepareStatement(q2);
+             ResultSet rs = ps.executeQuery()) {
+
+            while (rs.next()) {
+                String txId = rs.getString("transaction_id");
+                Date   due  = rs.getDate("due_date");
+                Date   ret  = rs.getDate("return_date");
+                long   days = ChronoUnit.DAYS.between(due.toLocalDate(), ret.toLocalDate());
+                double amt  = days * ratePerDay;
+                if (amt > 0) {
+                    insertAutoFine(txId, amt);
+                }
+            }
+        }
+    }
+
+    /* ==========================================================
+     *                    PRIVATE  HELPERS
+     * ========================================================== */
+
+    private void insertAutoFine(String txId, double amount) throws SQLException {
+        try (PreparedStatement ps =
+                 conn.prepareStatement("INSERT INTO fines "
+                                      + "(transaction_id, fine_amount, payment_status) "
+                                      + "VALUES (?, ?, 'unpaid')")) {
+            ps.setString(1, txId);
+            ps.setDouble(2, amount);
+            ps.executeUpdate();
+        }
+    }
+
+    /** تحويل ResultSet (أساسي) */
+    private Fine mapBasic(ResultSet rs) throws SQLException {
+        Fine f = new Fine();
+        f.setFineId        (rs.getInt   ("fine_id"));
+        f.setTransactionId (rs.getString("transaction_id"));
+        f.setFineAmount    (rs.getDouble("fine_amount"));
+        f.setPaymentStatus (rs.getString("payment_status"));
+        f.setPaidDate      (rs.getDate  ("paid_date"));
+        return f;
+    }
+
+    /** تحويل ResultSet مع جميع التفاصيل */
+    private Fine mapWithDetails(ResultSet rs) throws SQLException {
+        Fine f = mapBasic(rs);
+        f.setUserId        (rs.getInt   ("user_id"));
+        f.setUserFirstName (rs.getString("first_name"));
+        f.setUserLastName  (rs.getString("last_name"));
+        f.setBookId        (rs.getInt   ("book_id"));
+        f.setBookTitle     (rs.getString("title"));
+        f.setBorrowDate    (rs.getDate  ("borrow_date"));
+        f.setDueDate       (rs.getDate  ("due_date"));
+        return f;
     }
 }

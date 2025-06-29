@@ -2,6 +2,36 @@
 <project-private xmlns="http://www.netbeans.org/ns/project-private/1">
     <editor-bookmarks xmlns="http://www.netbeans.org/ns/editor-bookmarks/2" lastBookmarkId="0"/>
     <open-files xmlns="http://www.netbeans.org/ns/projectui-open-files/2">
-        <group/>
+        <group>
+            <file>file:/C:/Users/user/Downloads/Library/src/java/Controller/LoginServlet.java</file>
+            <file>file:/C:/Users/user/Downloads/Library/src/java/models/Transaction.java</file>
+            <file>file:/C:/Users/user/Downloads/Library/web/transactions_list.jsp</file>
+            <file>file:/C:/Users/user/Downloads/Library/web/borrow_confirm.jsp</file>
+            <file>file:/C:/Users/user/Downloads/Library/web/admin_dashboard.jsp</file>
+            <file>file:/C:/Users/user/Downloads/Library/web/return_book.jsp</file>
+            <file>file:/C:/Users/user/Downloads/Library/web/available_books.jsp</file>
+            <file>file:/C:/Users/user/Downloads/Library/src/java/DAO/TransactionDAO.java</file>
+            <file>file:/C:/Users/user/Downloads/Library/src/java/DAO/FineDAO.java</file>
+            <file>file:/C:/Users/user/Downloads/Library/src/java/Controller/FineServlet.java</file>
+            <file>file:/C:/Users/user/Downloads/Library/web/add_fine.jsp</file>
+            <file>file:/C:/Users/user/Downloads/Library/src/java/Util/DBConnection.java</file>
+            <file>file:/C:/Users/user/Downloads/Library/web/patron_fines.jsp</file>
+            <file>file:/C:/Users/user/Downloads/Library/web/register.jsp</file>
+            <file>file:/C:/Users/user/Downloads/Library/src/java/models/Fine.java</file>
+            <file>file:/C:/Users/user/Downloads/Library/src/java/Controller/UserServlet.java</file>
+            <file>file:/C:/Users/user/Downloads/Library/web/borrow_count_list.jsp</file>
+            <file>file:/C:/Users/user/Downloads/Library/web/borrow_history.jsp</file>
+            <file>file:/C:/Users/user/Downloads/Library/web/librarian_dashboard.jsp</file>
+            <file>file:/C:/Users/user/Downloads/Library/src/java/Controller/TransactionServlet.java</file>
+            <file>file:/C:/Users/user/Downloads/Library/web/fine_list.jsp</file>
+            <file>file:/C:/Users/user/Downloads/Library/src/java/Controller/AdminDashboardServlet.java</file>
+            <file>file:/C:/Users/user/Downloads/Library/src/java/DAO/BookDAO.java</file>
+            <file>file:/C:/Users/user/Downloads/Library/src/java/Controller/BookServlet.java</file>
+            <file>file:/C:/Users/user/Downloads/Library/src/java/Controller/NotificationServlet.java</file>
+            <file>file:/C:/Users/user/Downloads/Library/web/edit_fine.jsp</file>
+            <file>file:/C:/Users/user/Downloads/Library/src/java/Controller/SystemConfigServlet.java</file>
+            <file>file:/C:/Users/user/Downloads/Library/src/java/Controller/LogoutServlet.java</file>
+            <file>file:/C:/Users/user/Downloads/Library/web/patron_dashboard.jsp</file>
+        </group>
     </open-files>
 </project-private>
